@@ -1,3 +1,7 @@
-opencv-python==4.8.1.78
-tensorflow==2.15.0
-numpy==1.24.3
+# For Python 3.14 (Simplified Version - No AI)
+opencv-python==4.10.0.84
+numpy==2.2.0
+
+# Note: TensorFlow doesn't support Python 3.14 yet
+# For full AI emotion recognition, use Python 3.9-3.11 and add:
+# tensorflow==2.15.0
