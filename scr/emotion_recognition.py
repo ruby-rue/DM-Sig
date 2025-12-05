@@ -1,68 +1,52 @@
 """
-Facial Emotion Recognition App
-Detects faces and recognizes emotions in real-time using camera feed
+Facial Emotion Recognition using DeepFace
+Real-time emotion detection with pre-trained models
 """
 
 import cv2
-import numpy as np
-from tensorflow import keras
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
-import os
+from deepface import DeepFace
+import time
 
-class EmotionRecognizer:
+class DeepFaceEmotionRecognizer:
     def __init__(self):
-        self.emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.model = self.create_model()
+        self.emotion_colors = {
+            'angry': (0, 0, 255),      # Red
+            'disgust': (0, 128, 0),    # Green
+            'fear': (128, 0, 128),     # Purple
+            'happy': (0, 255, 255),    # Yellow
+            'sad': (255, 0, 0),        # Blue
+            'surprise': (255, 165, 0), # Orange
+            'neutral': (128, 128, 128) # Gray
+        }
         
-    def create_model(self):
-        """Create a CNN model for emotion recognition"""
-        model = Sequential([
-            Conv2D(32, kernel_size=(3, 3), activation='relu', input_shape=(48, 48, 1)),
-            Conv2D(64, kernel_size=(3, 3), activation='relu'),
-            MaxPooling2D(pool_size=(2, 2)),
-            Dropout(0.25),
-            
-            Conv2D(128, kernel_size=(3, 3), activation='relu'),
-            MaxPooling2D(pool_size=(2, 2)),
-            Conv2D(128, kernel_size=(3, 3), activation='relu'),
-            MaxPooling2D(pool_size=(2, 2)),
-            Dropout(0.25),
-            
-            Flatten(),
-            Dense(1024, activation='relu'),
-            Dropout(0.5),
-            Dense(7, activation='softmax')
-        ])
+        # Pre-load the model (optional but faster)
+        print("Loading DeepFace model...")
+        try:
+            DeepFace.analyze(img_path="test", actions=['emotion'], enforce_detection=False)
+        except:
+            pass
+        print("Model loaded!")
         
-        return model
-    
-    def load_weights(self, weights_path):
-        """Load pre-trained weights if available"""
-        if os.path.exists(weights_path):
-            self.model.load_weights(weights_path)
-            print("Weights loaded successfully!")
-        else:
-            print(f"Warning: Weights file not found at {weights_path}")
-            print("The model will run without pre-trained weights (random predictions)")
-    
-    def preprocess_face(self, face_img):
-        """Preprocess face image for model input"""
-        face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
-        face_img = cv2.resize(face_img, (48, 48))
-        face_img = face_img.astype('float32') / 255.0
-        face_img = np.expand_dims(face_img, axis=0)
-        face_img = np.expand_dims(face_img, axis=-1)
-        return face_img
-    
-    def predict_emotion(self, face_img):
-        """Predict emotion from face image"""
-        preprocessed = self.preprocess_face(face_img)
-        predictions = self.model.predict(preprocessed, verbose=0)
-        emotion_idx = np.argmax(predictions[0])
-        confidence = predictions[0][emotion_idx]
-        return self.emotion_labels[emotion_idx], confidence
+    def analyze_frame(self, frame):
+        """Analyze a frame for emotions using DeepFace"""
+        try:
+            # Analyze the frame
+            result = DeepFace.analyze(
+                img_path=frame,
+                actions=['emotion'],
+                enforce_detection=False,
+                detector_backend='opencv'
+            )
+            
+            # Handle both single face and multiple faces
+            if isinstance(result, list):
+                return result
+            else:
+                return [result]
+                
+        except Exception as e:
+            print(f"Analysis error: {e}")
+            return []
     
     def run(self):
         """Run the emotion recognition application"""
@@ -70,21 +54,24 @@ class EmotionRecognizer:
         
         if not cap.isOpened():
             print("Error: Could not open camera")
+            print("\nTroubleshooting:")
+            print("1. Make sure no other app is using the camera")
+            print("2. Check camera permissions in Windows Settings")
+            print("3. Try camera_test.py to find the correct camera index")
             return
         
-        print("Starting emotion recognition...")
-        print("Press 'q' to quit")
+        print("\n" + "="*60)
+        print("DeepFace Emotion Recognition Started!")
+        print("="*60)
+        print("Controls:")
+        print("  'q' - Quit")
+        print("  's' - Save screenshot")
+        print("="*60 + "\n")
         
-        # Set color scheme
-        emotion_colors = {
-            'Angry': (0, 0, 255),      # Red
-            'Disgust': (0, 128, 0),    # Green
-            'Fear': (128, 0, 128),     # Purple
-            'Happy': (0, 255, 255),    # Yellow
-            'Sad': (255, 0, 0),        # Blue
-            'Surprise': (255, 165, 0), # Orange
-            'Neutral': (128, 128, 128) # Gray
-        }
+        frame_count = 0
+        last_analysis_time = 0
+        analysis_interval = 0.5  # Analyze every 0.5 seconds (to reduce lag)
+        last_results = []
         
         while True:
             ret, frame = cap.read()
@@ -92,63 +79,90 @@ class EmotionRecognizer:
                 print("Error: Failed to capture frame")
                 break
             
-            # Convert to grayscale for face detection
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame_count += 1
+            current_time = time.time()
             
-            # Detect faces
-            faces = self.face_cascade.detectMultiScale(
-                gray, 
-                scaleFactor=1.1, 
-                minNeighbors=5, 
-                minSize=(30, 30)
-            )
+            # Only analyze every few frames to improve performance
+            if current_time - last_analysis_time >= analysis_interval:
+                last_results = self.analyze_frame(frame)
+                last_analysis_time = current_time
             
-            # Process each detected face
-            for (x, y, w, h) in faces:
-                # Extract face region
-                face_roi = frame[y:y+h, x:x+w]
+            # Draw results on frame
+            for result in last_results:
+                try:
+                    # Get face region
+                    region = result.get('region', {})
+                    x = region.get('x', 0)
+                    y = region.get('y', 0)
+                    w = region.get('w', 0)
+                    h = region.get('h', 0)
+                    
+                    # Get dominant emotion
+                    emotions = result.get('emotion', {})
+                    dominant_emotion = result.get('dominant_emotion', 'neutral')
+                    confidence = emotions.get(dominant_emotion, 0)
+                    
+                    # Get color for this emotion
+                    color = self.emotion_colors.get(dominant_emotion.lower(), (255, 255, 255))
+                    
+                    # Draw rectangle around face
+                    if w > 0 and h > 0:
+                        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 3)
+                        
+                        # Display emotion and confidence
+                        label = f"{dominant_emotion.capitalize()}: {confidence:.1f}%"
+                        
+                        # Draw background for text
+                        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)[0]
+                        cv2.rectangle(frame, (x, y-35), (x + text_size[0], y), color, -1)
+                        
+                        # Draw text
+                        cv2.putText(frame, label, (x, y-10), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+                        
+                        # Show all emotions (optional)
+                        y_offset = y + h + 25
+                        for emotion, score in sorted(emotions.items(), key=lambda x: x[1], reverse=True)[:3]:
+                            text = f"{emotion}: {score:.1f}%"
+                            cv2.putText(frame, text, (x, y_offset),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                            y_offset += 20
                 
-                # Predict emotion
-                emotion, confidence = self.predict_emotion(face_roi)
-                
-                # Get color for this emotion
-                color = emotion_colors.get(emotion, (255, 255, 255))
-                
-                # Draw rectangle around face
-                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                
-                # Display emotion and confidence
-                label = f"{emotion}: {confidence*100:.1f}%"
-                cv2.putText(frame, label, (x, y-10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+                except Exception as e:
+                    print(f"Drawing error: {e}")
+                    continue
             
             # Add instructions
-            cv2.putText(frame, "Press 'q' to quit", (10, 30),
+            cv2.putText(frame, "Press 'q' to quit | 's' to save", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            # Display the frame
-            cv2.imshow('Emotion Recognition', frame)
+            cv2.putText(frame, f"FPS: {1/(current_time - last_analysis_time + 0.001):.1f}", 
+                       (10, frame.shape[0] - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Break loop on 'q' press
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            # Display the frame
+            cv2.imshow('DeepFace Emotion Recognition', frame)
+            
+            # Handle key presses
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
+            elif key == ord('s'):
+                filename = f"emotion_capture_{int(time.time())}.jpg"
+                cv2.imwrite(filename, frame)
+                print(f"Screenshot saved as {filename}")
         
         # Cleanup
         cap.release()
         cv2.destroyAllWindows()
+        print("\n" + "="*60)
         print("Application closed")
+        print(f"Total frames processed: {frame_count}")
+        print("="*60)
 
 def main():
     """Main function to run the emotion recognition app"""
-    recognizer = EmotionRecognizer()
-    
-    # Optional: Load pre-trained weights
-    # You can download weights from various sources like:
-    # https://github.com/oarriaga/face_classification
-    weights_path = 'emotion_model_weights.h5'
-    recognizer.load_weights(weights_path)
-    
-    # Run the application
+    recognizer = DeepFaceEmotionRecognizer()
     recognizer.run()
 
 if __name__ == "__main__":
