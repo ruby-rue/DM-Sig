@@ -4,4 +4,4 @@ numpy==2.2.0
 
 # Note: TensorFlow doesn't support Python 3.14 yet
 # For full AI emotion recognition, use Python 3.9-3.11 and add:
-# tensorflow==2.15.0
+tensorflow==2.15.0
